@@ -1,0 +1,18 @@
+[
+    {
+        "name": "Oak Tree",
+        "species": "Quercus robur",
+        "description": "A majestic oak tree that's over 100 years old. It provides habitat for various birds and insects.",
+        "lat": 21.066874585209103,
+        "lng": 78.98212325711981,
+        "image": "oaktree.jpeg"
+    },
+    {
+        "name": "sdfd",
+        "species": "gg",
+        "description": "dfsdfsdfsdf",
+        "lat": 21.066534921547778,
+        "lng": 78.98304542794874,
+        "image": "sdfd.jpg"
+    }
+]

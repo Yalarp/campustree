@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campus Tree Mapper</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h2 class="site-title">Campus TREE MAPPER</h2>
+        
+        <div id="collegeMap"></div>
+        
+        <div id="mapControls">
+            <button class="map-layer-btn" id="standardMapBtn">Standard Map</button>
+            <button class="map-layer-btn" id="satelliteMapBtn">Satellite Map</button>
+        </div>
+        
+        <button class="gold-button" id="exciteButton">EXCITE ME</button>
+        
+        <div id="searchContainer">
+            <input type="text" id="searchInput" placeholder="Search trees by name or species...">
+            <i id="searchIcon" class="fas fa-search"></i>
+        </div>
+        
+        <h3><i class="fas fa-leaf"></i> Add a Tree to the Forest</h3>
+        <form id="treeForm" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="treeName">TREE NAME</label>
+                <input type="text" id="treeName" required placeholder="Enter tree name">
+            </div>
+            
+            <div class="form-group">
+                <label for="treeSpecies">SPECIES</label>
+                <input type="text" id="treeSpecies" required placeholder="Enter species name">
+            </div>
+            
+            <div class="form-group">
+                <label for="treeDescription">DESCRIPTION</label>
+                <textarea id="treeDescription" required placeholder="Describe the tree..."></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="treeImage">TREE IMAGE</label>
+                <input type="file" id="treeImage" accept="image/*" required>
+            </div>
+            
+            <button type="submit">ADD TO FOREST</button>
+        </form>
+    </div>
+
+    <div class="loading-indicator">
+        <div class="spinner"></div>
+        <p>Processing...</p>
+    </div>
+    
+    <div class="toast" id="notificationToast"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize loading indicator and toast
+            const loadingIndicator = document.querySelector('.loading-indicator');
+            const toast = document.querySelector('.toast');
+            
+            function showToast(message, isError = false) {
+                toast.textContent = message;
+                toast.classList.toggle('error', isError);
+                toast.classList.add('active');
+                setTimeout(() => toast.classList.remove('active'), 3000);
+            }
+
+            // Initialize map with forest-themed tiles
+            const map = L.map('collegeMap').setView([21.06675351713253, 78.98277695415248], 18);
+            
+            // Add multiple base layers
+            const standardLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors'
+            });
+            
+            const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            });
+            
+            // Default to standard map
+            standardLayer.addTo(map);
+            
+            // Set up layer switching
+            document.getElementById('standardMapBtn').addEventListener('click', function() {
+                map.removeLayer(satelliteLayer);
+                standardLayer.addTo(map);
+                showToast('Switched to standard map view');
+            });
+            
+            document.getElementById('satelliteMapBtn').addEventListener('click', function() {
+                map.removeLayer(standardLayer);
+                satelliteLayer.addTo(map);
+                showToast('Switched to satellite map view');
+            });
+
+            // Store all tree markers for search functionality
+            const treeMarkers = [];
+
+            // Custom tree marker icon
+            const treeIcon = L.icon({
+                iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+                shadowSize: [41, 41]
+            });
+
+            // Add tree marker function
+            function addTreeMarker(tree) {
+                let marker = L.marker([tree.lat, tree.lng], { 
+                    draggable: true,
+                    icon: treeIcon
+                }).addTo(map);
+                
+                // Store tree data with marker for searching
+                marker.treeData = {
+                    name: tree.name,
+                    species: tree.species,
+                    description: tree.description
+                };
+                
+                marker.bindPopup(`
+                    <div class="tree-popup">
+                        <h3>${tree.name}</h3>
+                        <img src="/static/uploads/${tree.image}" class="tree-popup-img" alt="${tree.name}">
+                        <div class="tree-popup-species">Species: ${tree.species}</div>
+                        <div class="tree-popup-description">${tree.description}</div>
+                        <button class="tree-popup-delete" onclick="deleteTree('${tree.name}')">
+                            <i class="fas fa-trash"></i> Remove Tree
+                        </button>
+                    </div>
+                `);
+
+                marker.on('dragend', function(e) {
+                    loadingIndicator.classList.add('active');
+                    let newLatLng = e.target.getLatLng();
+                    fetch('/update_tree_location', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: tree.name, lat: newLatLng.lat, lng: newLatLng.lng })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        loadingIndicator.classList.remove('active');
+                        showToast('Tree location updated successfully!');
+                    })
+                    .catch(error => {
+                        loadingIndicator.classList.remove('active');
+                        showToast('Error updating tree location', true);
+                    });
+                });
+                
+                // Add marker to the treeMarkers array for search functionality
+                treeMarkers.push(marker);
+                
+                return marker;
+            }
+
+            // Fetch all trees
+            loadingIndicator.classList.add('active');
+            fetch('/get_trees')
+                .then(response => response.json())
+                .then(trees => {
+                    trees.forEach(addTreeMarker);
+                    loadingIndicator.classList.remove('active');
+                })
+                .catch(error => {
+                    loadingIndicator.classList.remove('active');
+                    showToast('Error loading trees', true);
+                });
+
+            // Add tree form submission
+            document.getElementById('treeForm').addEventListener('submit', function(event) {
+                event.preventDefault();
+                loadingIndicator.classList.add('active');
+                
+                let formData = new FormData();
+                formData.append("name", document.getElementById('treeName').value);
+                formData.append("species", document.getElementById('treeSpecies').value);
+                formData.append("description", document.getElementById('treeDescription').value);
+                
+                // Get coordinates where the user clicked, or use center as default
+                const center = map._clickedLatLng || map.getCenter();
+                formData.append("lat", center.lat);
+                formData.append("lng", center.lng);
+                formData.append("image", document.getElementById('treeImage').files[0]);
+
+                fetch('/add_tree', { 
+                    method: 'POST', 
+                    body: formData 
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(tree => {
+                    addTreeMarker(tree);
+                    loadingIndicator.classList.remove('active');
+                    showToast('Tree added successfully to the forest!');
+                    
+                    // Reset form
+                    document.getElementById('treeForm').reset();
+                    
+                    // Remove temporary marker if exists
+                    if (map._tempMarker) {
+                        map.removeLayer(map._tempMarker);
+                        map._tempMarker = null;
+                        map._clickedLatLng = null;
+                    }
+                })
+                .catch(error => {
+                    loadingIndicator.classList.remove('active');
+                    showToast('Error adding tree', true);
+                });
+            });
+
+            // "Excite Me" button to fly to a random tree or location
+            document.getElementById('exciteButton').addEventListener('click', function() {
+                if (treeMarkers.length > 0) {
+                    // Randomly select a tree from the markers array
+                    const randomMarker = treeMarkers[Math.floor(Math.random() * treeMarkers.length)];
+                    const position = randomMarker.getLatLng();
+                    
+                    // Animate flying to the tree
+                    map.flyTo([position.lat, position.lng], 19, {
+                        animate: true,
+                        duration: 1.5
+                    });
+                    
+                    // Show a toast with tree info
+                    const treeInfo = randomMarker.treeData;
+                    showToast(`Exploring: ${treeInfo.name} (${treeInfo.species})`);
+                    
+                    // Open the popup
+                    setTimeout(() => randomMarker.openPopup(), 1600);
+                } else {
+                    showToast('No trees in the forest yet. Add some!');
+                }
+            });
+
+            // Fixed search functionality
+            document.getElementById('searchInput').addEventListener('input', function() {
+                let query = this.value.toLowerCase().trim();
+                
+                if (query.length === 0) {
+                    // Show all markers when search is empty
+                    treeMarkers.forEach(marker => {
+                        marker.setOpacity(1);
+                    });
+                    return;
+                }
+                
+                // Search through treeMarkers array
+                let foundAny = false;
+                
+                treeMarkers.forEach(marker => {
+                    const treeData = marker.treeData;
+                    const isMatch = 
+                        treeData.name.toLowerCase().includes(query) || 
+                        treeData.species.toLowerCase().includes(query) || 
+                        treeData.description.toLowerCase().includes(query);
+                    
+                    // Show/hide based on match
+                    marker.setOpacity(isMatch ? 1 : 0.3);
+                    
+                    if (isMatch) {
+                        foundAny = true;
+                        // If it's a very specific match, open the popup
+                        if (treeData.name.toLowerCase() === query || treeData.species.toLowerCase() === query) {
+                            marker.openPopup();
+                            map.panTo(marker.getLatLng());
+                        }
+                    }
+                });
+                
+                if (!foundAny && query.length > 2) {
+                    showToast('No trees matching your search');
+                }
+            });
+
+            // Add a search button click event
+            document.getElementById('searchIcon').addEventListener('click', function() {
+                // Trigger the search using the current input value
+                const searchEvent = new Event('input', { bubbles: true });
+                document.getElementById('searchInput').dispatchEvent(searchEvent);
+            });
+
+            // Allow users to add trees by clicking on the map
+            map.on('click', function(e) {
+                // Store the coordinates for when the form is submitted
+                map._clickedLatLng = e.latlng;
+                
+                // Show a visual indicator of the selected location
+                if (map._tempMarker) {
+                    map.removeLayer(map._tempMarker);
+                }
+                
+                map._tempMarker = L.marker(e.latlng, {
+                    opacity: 0.7,
+                    icon: treeIcon
+                }).addTo(map);
+                
+                showToast('Location selected. Fill the form to add a tree here.');
+                
+                // Focus on the first form field
+                document.getElementById('treeName').focus();
+            });
+
+            // Global delete function for tree markers
+            window.deleteTree = function(treeName) {
+                if (confirm(`Are you sure you want to remove ${treeName} from the forest?`)) {
+                    loadingIndicator.classList.add('active');
+                    fetch('/delete_tree', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: treeName })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        loadingIndicator.classList.remove('active');
+                        showToast(`${treeName} has been removed from the forest.`);
+                        
+                        // Remove marker from the array and map without page reload
+                        for (let i = 0; i < treeMarkers.length; i++) {
+                            if (treeMarkers[i].treeData.name === treeName) {
+                                map.removeLayer(treeMarkers[i]);
+                                treeMarkers.splice(i, 1);
+                                break;
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        loadingIndicator.classList.remove('active');
+                        showToast('Error removing tree', true);
+                    });
+                }
+            };
+        });
+    </script>
+
+</body>
+</html>
